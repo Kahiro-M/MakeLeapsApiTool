@@ -1,0 +1,4 @@
+[MakeLeaps]
+USER_MAKELEAPS_ID={自社のMakeLeaps ID}
+CLIENT_ID={MakeLeapsのAPIキー Client ID}
+CLIENT_SECRET={MakeLeapsのAPIキー Client Secret}
