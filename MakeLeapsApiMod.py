@@ -206,96 +206,96 @@ def getDocumentClickedDate(config,dateBegin,dateEnd,mode='simple'):
 
     # 指定の日付2つから日付リストを取得
     dateList = getDateList(dateBegin,dateEnd)
-    for targetDate in dateList:
-        # 文書検索条件は指定の作成日、請求書、有効、1ページ100件まで
-        docParams = {
-            'date': targetDate,
-            'document_type': 'invoice',
-            'cancelled': False,
-            'per_page':100,
-        }
-        print(f'請求書作成日:{targetDate}')
 
-        # 請求書一覧　URLを指定してcurl経由でAPIを叩く
-        dockListUrl = 'https://api.makeleaps.com/api/partner/'+userMakeleapsId+'/document/'
-        nextUrl = dockListUrl
-        
-        printProgressFlg = True
-        firstGetDocListFlg = True
-        
-        # 請求書一覧の{'meta':{'next':'https://api.makeleaps.com/api.....'}}がNoneになるまで
-        while nextUrl:
-            # 請求書一覧取得
-            if(firstGetDocListFlg):
-                docListRes = getWithRetry(nextUrl, docParams, headers)
-                firstGetDocListFlg = False
-            else:
-                docListRes = getWithRetry(nextUrl, nullParams, headers)
-            nextUrl = docListRes['meta']['next']
+    # 文書検索条件は指定範囲の作成日、請求書、有効、1ページ100件まで
+    docParams = {
+        'date__gte': dateList[0],
+        'date__lte': dateList[-1],
+        'document_type': 'invoice',
+        'cancelled': False,
+        'per_page':100,
+    }
 
-            if(printProgressFlg):
-                print(f"    対象件数:{docListRes['meta']['count']}")
-                print(f"    対象ページ数:{math.ceil(docListRes['meta']['count']/100)}")
-                printProgressFlg = False
+    # 請求書一覧　URLを指定してcurl経由でAPIを叩く
+    dockListUrl = 'https://api.makeleaps.com/api/partner/'+userMakeleapsId+'/document/'
+    nextUrl = dockListUrl
+    
+    printProgressFlg = True
+    firstGetDocListFlg = True
+    
+    # 請求書一覧の{'meta':{'next':'https://api.makeleaps.com/api.....'}}がNoneになるまで
+    while nextUrl:
+        # 請求書一覧取得
+        if(firstGetDocListFlg):
+            docListRes = getWithRetry(nextUrl, docParams, headers)
+            firstGetDocListFlg = False
+        else:
+            docListRes = getWithRetry(nextUrl, nullParams, headers)
+        nextUrl = docListRes['meta']['next']
 
-            if(docCount%100 == 0):
-                print(f"        進捗:{docCount}件 取得済み")
+        if(printProgressFlg):
+            print(f"    対象件数:{docListRes['meta']['count']}")
+            print(f"    対象ページ数:{math.ceil(docListRes['meta']['count']/100)}")
+            printProgressFlg = False
 
-            # 請求書一覧の現在のページ
-            for docInfo in docListRes['response']:
-                # 書き込み用データ初期化
-                clinetCode = ''
-                clinetName = ''
-                docName = ''
-                docSendTo = ''
-                docCreated = ''
-                docSent = ''
-                docCliced = ''
-                docExpiration = ''
+        if(docCount%100 == 0):
+            print(f"        進捗:{docCount}件 取得済み")
 
-                # 文書情報
-                docMid = docInfo['mid']
-                docCreated = docInfo['date']
-                docSent = getDatetimeJST(docInfo['date_sent'])
-                docName = docInfo['project_name']
-                clinetName = docInfo['recipient_name']
-                
-                if(mode == 'detail'):
-                    # 取引先情報
-                    clientInfoUrl = docInfo['client']
-                    clientInfoRes = getWithRetry(clientInfoUrl, nullParams, headers)
-                    clinetCode = clientInfoRes['response']['client_external_id']
-                    clinetName = clientInfoRes['response']['display_name']
+        # 請求書一覧の現在のページ
+        for docInfo in docListRes['response']:
+            # 書き込み用データ初期化
+            clinetCode = ''
+            clinetName = ''
+            docName = ''
+            docSendTo = ''
+            docCreated = ''
+            docSent = ''
+            docCliced = ''
+            docExpiration = ''
 
-                    # 請求書リンク情報 
-                    docLinkInfoUrl = 'https://api.makeleaps.com/api/partner/'+userMakeleapsId+'/document/'+docMid+'/pickup-link/'
-                    try:
-                        docLinkInfoRes = getWithRetry(docLinkInfoUrl, nullParams, headers)
-                    except Exception as e:
-                        print("Error:", e)
+            # 文書情報
+            docMid = docInfo['mid']
+            docCreated = docInfo['date']
+            docSent = getDatetimeJST(docInfo['date_sent'])
+            docName = docInfo['project_name']
+            clinetName = docInfo['recipient_name']
+            
+            if(mode == 'detail'):
+                # 取引先情報
+                clientInfoUrl = docInfo['client']
+                clientInfoRes = getWithRetry(clientInfoUrl, nullParams, headers)
+                clinetCode = clientInfoRes['response']['client_external_id']
+                clinetName = clientInfoRes['response']['display_name']
 
-                    docLinkInfo = docLinkInfoRes['response'][0]
+                # 請求書リンク情報 
+                docLinkInfoUrl = 'https://api.makeleaps.com/api/partner/'+userMakeleapsId+'/document/'+docMid+'/pickup-link/'
+                try:
+                    docLinkInfoRes = getWithRetry(docLinkInfoUrl, nullParams, headers)
+                except Exception as e:
+                    print("Error:", e)
 
-                    docSendTo = docLinkInfo['email']
-                    if(docLinkInfo['date_clicked'] == None):
-                        docCliced = ''
-                    else:
-                        docCliced = getDatetimeJST(docLinkInfo['date_clicked'])
-                    docExpiration = getDatetimeJST(docLinkInfo['expiration_date'])
+                docLinkInfo = docLinkInfoRes['response'][0]
 
-                # データ書き込み
-                appendData = [
-                    clinetCode,
-                    clinetName,
-                    docName,
-                    docSendTo,
-                    docCreated,
-                    docSent,
-                    docCliced,
-                    docExpiration,
-                ]
-                docCount += 1
-                csvData.append(appendData)
+                docSendTo = docLinkInfo['email']
+                if(docLinkInfo['date_clicked'] == None):
+                    docCliced = ''
+                else:
+                    docCliced = getDatetimeJST(docLinkInfo['date_clicked'])
+                docExpiration = getDatetimeJST(docLinkInfo['expiration_date'])
+
+            # データ書き込み
+            appendData = [
+                clinetCode,
+                clinetName,
+                docName,
+                docSendTo,
+                docCreated,
+                docSent,
+                docCliced,
+                docExpiration,
+            ]
+            docCount += 1
+            csvData.append(appendData)
 
     # token破棄
     revokeToken(token,config)
