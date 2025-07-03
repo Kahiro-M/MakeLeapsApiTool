@@ -109,7 +109,7 @@ def getWithRetry(url, params={}, headers={}, maxRetries=5):
         elif response.status_code == 429:
             retry_after = response.headers.get("Retry-After")
             waitTime = int(retry_after) if retry_after and retry_after.isdigit() else 60
-            print(f"[{attempt+1}/{maxRetries}] 回試行. {waitTime} 秒後に再試行...")
+            print(f"[{attempt+1}/{maxRetries}] 回試行. {waitTime} 秒後に再試行  url:{url}")
             time.sleep(waitTime)
 
         else:
@@ -159,10 +159,81 @@ def getDatetimeJST(utcStr):
     dtJst = dtUtc.astimezone(ZoneInfo("Asia/Tokyo"))
     return dtJst.strftime("%Y-%m-%d %H:%M:%S")
 
+def processDocInfo(docInfo, mode, headers, userMakeleapsId):
+    # 文書検索条件の初期化
+    nullParams = {}
+
+    # 書き込み用データ初期化
+    clinetCode = ''
+    clinetName = ''
+    docName = ''
+    docSendTo = ''
+    docCreated = ''
+    docSent = ''
+    docCliced = ''
+    docExpiration = ''
+
+    # 文書情報
+    docMid = docInfo['mid']
+    docCreated = docInfo['date']
+    docSent = getDatetimeJST(docInfo['date_sent'])
+    docName = docInfo['project_name']
+    clinetName = docInfo['recipient_name']
+    
+    if(mode == 'detail'):
+        # 取引先情報
+        clientInfoUrl = docInfo['client']
+        clientInfoRes = getWithRetry(clientInfoUrl, nullParams, headers)
+        clinetCode = clientInfoRes['response']['client_external_id']
+        clinetName = clientInfoRes['response']['display_name']
+
+        # 請求書リンク情報 
+        docLinkInfoUrl = 'https://api.makeleaps.com/api/partner/'+userMakeleapsId+'/document/'+docMid+'/pickup-link/'
+        try:
+            docLinkInfoRes = getWithRetry(docLinkInfoUrl, nullParams, headers)
+        except Exception as e:
+            print("Error:", e)
+
+        docLinkInfo = docLinkInfoRes['response'][0]
+
+        docSendTo = docLinkInfo['email']
+        if(docLinkInfo['date_clicked'] == None):
+            docCliced = ''
+        else:
+            docCliced = getDatetimeJST(docLinkInfo['date_clicked'])
+        docExpiration = getDatetimeJST(docLinkInfo['expiration_date'])
+
+    # データ書き込み
+    appendData = [
+        clinetCode,
+        clinetName,
+        docName,
+        docSendTo,
+        docCreated,
+        docSent,
+        docCliced,
+        docExpiration,
+    ]
+    return appendData
+
+def processAllDocList(docListRes, mode, headers, userMakeleapsId):
+    from concurrent.futures import ThreadPoolExecutor
+    docInfos = docListRes['response']
+    csvData = []
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = [
+            executor.submit(processDocInfo, docInfo, mode, headers, userMakeleapsId)
+            for docInfo in docInfos
+        ]
+        for future in futures:
+            result = future.result()
+            csvData.append(result)
+    return csvData
 
 # 書類参照リンクのクリックされた情報を取得
 def getDocumentClickedDate(config,dateBegin,dateEnd,mode='simple'):
     import math
+
     # csvデータ準備
     csvHeader = [
         '会員番号',
@@ -241,61 +312,11 @@ def getDocumentClickedDate(config,dateBegin,dateEnd,mode='simple'):
         if(docCount%100 == 0):
             print(f"        進捗:{docCount}件 取得済み")
 
-        # 請求書一覧の現在のページ
-        for docInfo in docListRes['response']:
-            # 書き込み用データ初期化
-            clinetCode = ''
-            clinetName = ''
-            docName = ''
-            docSendTo = ''
-            docCreated = ''
-            docSent = ''
-            docCliced = ''
-            docExpiration = ''
-
-            # 文書情報
-            docMid = docInfo['mid']
-            docCreated = docInfo['date']
-            docSent = getDatetimeJST(docInfo['date_sent'])
-            docName = docInfo['project_name']
-            clinetName = docInfo['recipient_name']
-            
-            if(mode == 'detail'):
-                # 取引先情報
-                clientInfoUrl = docInfo['client']
-                clientInfoRes = getWithRetry(clientInfoUrl, nullParams, headers)
-                clinetCode = clientInfoRes['response']['client_external_id']
-                clinetName = clientInfoRes['response']['display_name']
-
-                # 請求書リンク情報 
-                docLinkInfoUrl = 'https://api.makeleaps.com/api/partner/'+userMakeleapsId+'/document/'+docMid+'/pickup-link/'
-                try:
-                    docLinkInfoRes = getWithRetry(docLinkInfoUrl, nullParams, headers)
-                except Exception as e:
-                    print("Error:", e)
-
-                docLinkInfo = docLinkInfoRes['response'][0]
-
-                docSendTo = docLinkInfo['email']
-                if(docLinkInfo['date_clicked'] == None):
-                    docCliced = ''
-                else:
-                    docCliced = getDatetimeJST(docLinkInfo['date_clicked'])
-                docExpiration = getDatetimeJST(docLinkInfo['expiration_date'])
-
-            # データ書き込み
-            appendData = [
-                clinetCode,
-                clinetName,
-                docName,
-                docSendTo,
-                docCreated,
-                docSent,
-                docCliced,
-                docExpiration,
-            ]
-            docCount += 1
-            csvData.append(appendData)
+        # 請求書一覧から並行処理で情報取得
+        docInfoList = processAllDocList(docListRes, mode, headers, userMakeleapsId)
+        for docInfo in docInfoList:
+            csvData.append(docInfo)
+        docCount += len(docListRes['response'])
 
     # token破棄
     revokeToken(token,config)
