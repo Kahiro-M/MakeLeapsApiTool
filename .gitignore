@@ -163,3 +163,4 @@ cython_debug/
 
 *.ini
 launch.json
+invoice_result.csv
